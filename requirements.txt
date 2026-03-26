@@ -1,0 +1,10 @@
+streamlit
+pandas
+psycopg2-binary
+sqlalchemy
+openpyxl
+fpdf2
+arabic-reshaper
+python-bidi
+plotly
+arabic-reshaper
