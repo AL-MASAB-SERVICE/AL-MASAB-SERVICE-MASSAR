@@ -25,7 +25,7 @@ if "init" not in st.session_state:
         save_user(
             "yassinederra@service",
             "yassinederra.2009",
-            "admin",
+            "super_admin",  # تغيير من admin إلى super_admin
             "Yassine",
             "Derra",
             "-",   # phone
@@ -63,9 +63,9 @@ else:
     st.sidebar.divider()
 
     # =========================
-    # 🟢 توجيه حسب الدور
+    # 🟢 توجيه حسب الدور (مع إضافة super_admin)
     # =========================
-    if role == "admin":
+    if role == "super_admin" or role == "admin":
         admin_panel()
 
     elif role == "prof":
