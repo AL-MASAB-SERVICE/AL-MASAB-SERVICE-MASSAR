@@ -8,20 +8,16 @@ from datetime import datetime
 import re
 import hashlib
 import secrets
-from io import BytesIO
-import plotly.graph_objects as go
 
 # =========================
 # 🔐 Hashing + Salt
 # =========================
 def hash_password(password: str) -> tuple:
-    """توليد Salt + Hash لكلمة المرور"""
     salt = secrets.token_hex(32)
     hash_obj = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
     return salt, hash_obj.hex()
 
 def verify_password(password: str, salt: str, hash_value: str) -> bool:
-    """التحقق من صحة كلمة المرور"""
     hash_obj = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
     return hash_obj.hex() == hash_value
 
@@ -30,12 +26,11 @@ def verify_password(password: str, salt: str, hash_value: str) -> bool:
 # =========================
 def log_audit(action: str, target_type: str = None, target_id: str = None, 
               target_name: str = None, details: str = None):
-    """تسجيل كل عملية في سجل التدقيق"""
     try:
         conn = get_connection()
         conn.execute(text("""
-            INSERT INTO audit_log (admin_login, admin_name, action, target_type, target_id, target_name, details, ip_address, user_agent, created_at)
-            VALUES (:admin_login, :admin_name, :action, :target_type, :target_id, :target_name, :details, :ip, :ua, NOW())
+            INSERT INTO audit_log (admin_login, admin_name, action, target_type, target_id, target_name, details, created_at)
+            VALUES (:admin_login, :admin_name, :action, :target_type, :target_id, :target_name, :details, NOW())
         """), {
             "admin_login": st.session_state.get("login_user", "unknown"),
             "admin_name": st.session_state.get("name", "unknown"),
@@ -43,20 +38,17 @@ def log_audit(action: str, target_type: str = None, target_id: str = None,
             "target_type": target_type,
             "target_id": target_id,
             "target_name": target_name,
-            "details": details,
-            "ip": st.context.headers.get("X-Forwarded-For", "unknown") if hasattr(st, 'context') else "unknown",
-            "ua": st.context.headers.get("User-Agent", "unknown") if hasattr(st, 'context') else "unknown"
+            "details": details
         })
         conn.commit()
         conn.close()
     except Exception as e:
-        st.error(f"خطأ في تسجيل التدقيق: {e}")
+        pass
 
 # =========================
-# 🔐 التحقق من الصلاحيات (RBAC)
+# 🔐 التحقق من الصلاحيات
 # =========================
 def has_permission(permission: str) -> bool:
-    """التحقق من صلاحية المستخدم"""
     if "user_permissions" not in st.session_state:
         conn = get_connection()
         role = st.session_state.get("role", "viewer")
@@ -116,7 +108,7 @@ def toggle_theme():
     
     col1, col2 = st.columns([6, 1])
     with col2:
-        if st.button("🌓" if st.session_state.theme == "light" else "☀️"):
+        if st.button("🌙" if st.session_state.theme == "light" else "☀️"):
             st.session_state.theme = "dark" if st.session_state.theme == "light" else "light"
             st.rerun()
     
@@ -130,94 +122,40 @@ def toggle_theme():
             .stTextInput>div>div>input, .stSelectbox>div>div, .stTextArea>div>textarea {
                 background-color: #1e1e2e !important;
                 color: #ffffff !important;
-                border: 1px solid #444 !important;
             }
             div.stButton > button {
                 background: linear-gradient(45deg, #11998e, #38ef7d) !important;
                 color: white !important;
             }
-            .stDataFrame {
-                background-color: #1e1e2e !important;
-            }
         </style>
         """, unsafe_allow_html=True)
 
 # =========================
-# 📊 Dashboard الرئيسي
+# 📊 Dashboard
 # =========================
 def show_dashboard():
-    st.markdown("""
-    <style>
-        .dashboard-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 15px;
-            padding: 20px;
-            color: white;
-            text-align: center;
-            margin: 10px;
-        }
-        .dashboard-number {
-            font-size: 36px;
-            font-weight: bold;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-    
     st.markdown("<h1 style='text-align: center;'>🏢 لوحة التحكم الرئيسية</h1>", unsafe_allow_html=True)
     
     conn = get_connection()
     
-    # إحصائيات سريعة
     users_count = conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()[0]
-    active_users = conn.execute(text("SELECT COUNT(*) FROM users WHERE status='active'")).fetchone()[0]
+    active_users = conn.execute(text("SELECT COUNT(*) FROM users WHERE status='active' AND partial_block_percent=0")).fetchone()[0]
     stopped_users = conn.execute(text("SELECT COUNT(*) FROM users WHERE status='stopped'")).fetchone()[0]
+    partial_blocked = conn.execute(text("SELECT COUNT(*) FROM users WHERE status='active' AND partial_block_percent > 0")).fetchone()[0]
     pending_recl = conn.execute(text("SELECT COUNT(*) FROM reclamations_extended WHERE status='pending'")).fetchone()[0]
     
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown(f"""
-        <div class='dashboard-card'>
-            <div>👥 إجمالي المستخدمين</div>
-            <div class='dashboard-number'>{users_count}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-        <div class='dashboard-card' style='background: linear-gradient(135deg, #11998e, #38ef7d);'>
-            <div>🟢 المستخدمين النشطين</div>
-            <div class='dashboard-number'>{active_users}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-        <div class='dashboard-card' style='background: linear-gradient(135deg, #eb3349, #f45c43);'>
-            <div>🔴 المستخدمين الموقوفين</div>
-            <div class='dashboard-number'>{stopped_users}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col4:
-        st.markdown(f"""
-        <div class='dashboard-card' style='background: linear-gradient(135deg, #f093fb, #f5576c);'>
-            <div>📩 الشكايات المعلقة</div>
-            <div class='dashboard-number'>{pending_recl}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("👥 إجمالي المستخدمين", users_count)
+    col2.metric("🟢 النشطين بالكامل", active_users)
+    col3.metric("🟡 الموقوفين جزئياً", partial_blocked)
+    col4.metric("🔴 الموقوفين كلياً", stopped_users)
+    col5.metric("📩 الشكايات المعلقة", pending_recl)
     
     st.divider()
     
-    # الرسم البياني لعدد المستخدمين
-    users_by_role = pd.read_sql("""
-        SELECT role, COUNT(*) as count FROM users GROUP BY role
-    """, conn)
-    
-    fig = go.Figure(data=[go.Pie(labels=users_by_role['role'], values=users_by_role['count'], hole=.3)])
-    fig.update_layout(title="توزيع المستخدمين حسب الدور", template="plotly_dark" if st.session_state.get("theme") == "dark" else "plotly_white")
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # آخر 10 عمليات في سجل التدقيق
     st.markdown("### 📋 آخر العمليات المسجلة")
     audit = pd.read_sql("""
-        SELECT admin_name, action, target_name, created_at 
+        SELECT admin_name, action, target_name, details, created_at 
         FROM audit_log ORDER BY id DESC LIMIT 10
     """, conn)
     conn.close()
@@ -231,22 +169,23 @@ def show_dashboard():
 # 🧑‍🔧 لوحة admin الرئيسية
 # =========================
 def admin_panel():
-    # تفعيل الثيم
     toggle_theme()
     
-    # قائمة الصلاحيات الديناميكية
+    # بناء القائمة حسب الصلاحيات
     menu = ["🏠 Dashboard"]
     
     if has_permission("create_user"):
         menu.append("➕ إنشاء حساب")
-    if has_permission("create_reclamation"):
-        menu.append("📝 إنشاء شكاية جديدة")
     if has_permission("view_users"):
-        menu.append("📋 إدارة الحسابات")
+        menu.append("📋 عرض الحسابات")
     if has_permission("block_user"):
-        menu.append("🚫 توقيف حساب")
+        menu.append("🚫 توقيف كامل")
+    if has_permission("partial_block_user"):
+        menu.append("⚠️ توقيف جزئي")
+    if has_permission("partial_unblock_user"):
+        menu.append("🔄 استرجاع حساب موقوف جزئياً")
     if has_permission("unblock_user"):
-        menu.append("🔄 إعادة تفعيل حساب")
+        menu.append("✅ إعادة تفعيل كامل")
     if has_permission("change_password"):
         menu.append("🔑 تغيير كلمة المرور")
     if has_permission("delete_user"):
@@ -257,17 +196,16 @@ def admin_panel():
         menu.append("🔌 التحكم في النظام")
     if has_permission("view_audit_log"):
         menu.append("📊 سجل التدقيق")
-    if has_permission("manage_admins"):
+    if has_permission("manage_permissions"):
         menu.append("👑 إدارة الصلاحيات")
     
-    choice = st.sidebar.selectbox("القائمة الرئيسية", menu)
+    choice = st.sidebar.selectbox("القائمة", menu)
     
-    # عرض اسم المستخدم والصلاحية
+    # عرض معلومات المستخدم
     st.sidebar.divider()
     st.sidebar.markdown(f"""
     ### 👤 {st.session_state.get('name', 'Admin')}
     *الدور:* {st.session_state.get('role', 'admin')}
-    *الصلاحية:* {"🟢 Super Admin" if '*' in st.session_state.get('user_permissions', []) else "🟡 Admin"}
     """)
     
     if st.sidebar.button("🚪 تسجيل الخروج"):
@@ -306,8 +244,8 @@ def admin_panel():
                     
                     conn = get_connection()
                     conn.execute(text("""
-                        INSERT INTO users (login, password_hash, password_salt, role, name, lastname, phone, subject, status, created_by, created_at)
-                        VALUES (:login, :hash, :salt, :role, :name, :lastname, :phone, :subject, 'active', :created_by, NOW())
+                        INSERT INTO users (login, password_hash, password_salt, role, name, lastname, phone, subject, status, created_by, created_at, partial_block_percent)
+                        VALUES (:login, :hash, :salt, :role, :name, :lastname, :phone, :subject, 'active', :created_by, NOW(), 0)
                     """), {
                         "login": login,
                         "hash": hash_val,
@@ -322,94 +260,19 @@ def admin_panel():
                     conn.commit()
                     conn.close()
                     
-                    # تسجيل في Audit Log
                     log_audit("create_user", "user", login, f"{name} {lastname}", f"تم إنشاء حساب بدور {role}")
                     
-                    st.success(f"✅ تم إنشاء الحساب بنجاح")
+                    st.success(f"✅ تم إنشاء الحساب")
                     st.info(f"*Login:* {login}")
                     st.warning(f"*Password:* {password}")
                 else:
                     st.error("❌ الإسم والنسب مطلوبان")
     
     # =========================
-    # 📝 إنشاء شكاية جديدة
+    # 📋 عرض الحسابات
     # =========================
-    elif choice == "📝 إنشاء شكاية جديدة":
-        st.subheader("📝 إنشاء شكاية جديدة")
-        
-        with st.form("reclamation_form"):
-            st.markdown("### 📞 معلومات المتصل")
-            col1, col2 = st.columns(2)
-            with col1:
-                caller_name = st.text_input("إسم المتصل")
-            with col2:
-                caller_lastname = st.text_input("نسب المتصل")
-            
-            st.markdown("### 👤 معلومات صاحب الحساب")
-            col3, col4 = st.columns(2)
-            with col3:
-                account_name = st.text_input("إسم صاحب الحساب")
-            with col4:
-                account_lastname = st.text_input("نسب صاحب الحساب")
-            
-            if account_name and account_lastname:
-                conn = get_connection()
-                user_info = conn.execute(text("""
-                    SELECT login, created_at, phone, status, name, lastname
-                    FROM users 
-                    WHERE name ILIKE :name AND lastname ILIKE :lastname
-                """), {"name": f"%{account_name}%", "lastname": f"%{account_lastname}%"}).fetchone()
-                conn.close()
-                
-                if user_info:
-                    st.success("✅ تم العثور على الحساب")
-                    st.markdown(f"""
-                    - *إسم الحساب:* {user_info[0]}
-                    - *تاريخ الإنشاء:* {user_info[1].strftime('%Y-%m-%d') if user_info[1] else 'غير معروف'}
-                    - *رقم التواصل:* {user_info[2] if user_info[2] else 'غير مسجل'}
-                    - *حالة الحساب:* {"🟢 نشط" if user_info[3] == 'active' else "🔴 موقوف"}
-                    """)
-                    account_login = user_info[0]
-                else:
-                    st.warning("⚠️ لم يتم العثور على حساب بهذه المعلومات")
-                    account_login = None
-            else:
-                account_login = None
-            
-            st.markdown("### 📝 معلومات الشكاية")
-            reason = st.text_area("سبب الشكاية", height=150)
-            
-            if st.form_submit_button("📤 إرسال الشكاية"):
-                if not caller_name or not caller_lastname or not account_name or not account_lastname or not reason:
-                    st.error("❌ جميع الحقول مطلوبة")
-                elif not account_login:
-                    st.error("❌ لم يتم العثور على حساب صاحب الحساب")
-                else:
-                    conn = get_connection()
-                    conn.execute(text("""
-                        INSERT INTO reclamations_extended 
-                        (caller_name, caller_lastname, account_name, account_lastname, account_login, reason, created_at, created_time, status)
-                        VALUES (:caller_name, :caller_lastname, :account_name, :account_lastname, :account_login, :reason, CURRENT_DATE, CURRENT_TIME, 'pending')
-                    """), {
-                        "caller_name": caller_name,
-                        "caller_lastname": caller_lastname,
-                        "account_name": account_name,
-                        "account_lastname": account_lastname,
-                        "account_login": account_login,
-                        "reason": reason
-                    })
-                    conn.commit()
-                    conn.close()
-                    
-                    log_audit("create_reclamation", "reclamation", account_login, f"{account_name} {account_lastname}", reason)
-                    st.success("✅ تم حفظ الشكاية بنجاح")
-                    st.balloons()
-    
-    # =========================
-    # 📋 إدارة الحسابات
-    # =========================
-    elif choice == "📋 إدارة الحسابات":
-        st.subheader("📋 إدارة الحسابات")
+    elif choice == "📋 عرض الحسابات":
+        st.subheader("📋 عرض الحسابات")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -419,77 +282,43 @@ def admin_panel():
         
         if st.button("🔍 بحث", use_container_width=True):
             conn = get_connection()
-            query = """
-                SELECT u.*, 
-                       (SELECT COUNT(*) FROM reclamations_extended WHERE account_login = u.login) as recl_count
-                FROM users u
-                WHERE 1=1
-            """
+            query = "SELECT * FROM users WHERE 1=1"
             params = {}
             if search_name:
-                query += " AND u.name ILIKE :name"
+                query += " AND name ILIKE :name"
                 params["name"] = f"%{search_name}%"
             if search_lastname:
-                query += " AND u.lastname ILIKE :lastname"
+                query += " AND lastname ILIKE :lastname"
                 params["lastname"] = f"%{search_lastname}%"
             
             users = pd.read_sql(query, conn, params=params)
             conn.close()
             
             if not users.empty:
-                for _, user in users.iterrows():
-                    with st.expander(f"👤 {user['name']} {user['lastname']} - {user['login']}"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.markdown(f"""
-                            - *الدور:* {user['role']}
-                            - *الهاتف:* {user['phone'] if user['phone'] else 'غير مسجل'}
-                            - *المادة:* {user['subject'] if user['subject'] else '-'}
-                            - *الحالة:* {"🟢 نشط" if user['status'] == 'active' else "🔴 موقوف"}
-                            - *تاريخ الإنشاء:* {user['created_at'].strftime('%Y-%m-%d %H:%M') if user['created_at'] else 'غير معروف'}
-                            - *أنشأ الحساب:* {user['created_by'] if user['created_by'] else 'غير معروف'}
-                            - *عدد مرات الدخول:* {user['login_count'] if user['login_count'] else 0}
-                            """)
-                        with col2:
-                            if user['status'] == 'stopped' and has_permission("unblock_user"):
-                                if st.button(f"✅ إعادة تفعيل", key=f"unblock_{user['login']}"):
-                                    conn = get_connection()
-                                    conn.execute(text("""
-                                        UPDATE users SET status='active', blocked_at=NULL, blocked_reason=NULL, blocked_by=NULL, failed_login_attempts=0
-                                        WHERE login=:login
-                                    """), {"login": user['login']})
-                                    conn.commit()
-                                    conn.close()
-                                    log_audit("unblock_user", "user", user['login'], f"{user['name']} {user['lastname']}", "تم إعادة التفعيل")
-                                    st.success("✅ تم إعادة التفعيل")
-                                    st.rerun()
-                            elif user['status'] == 'active' and has_permission("block_user"):
-                                if st.button(f"🚫 توقيف", key=f"block_{user['login']}"):
-                                    conn = get_connection()
-                                    conn.execute(text("""
-                                        UPDATE users SET status='stopped', blocked_at=NOW(), blocked_by=:admin
-                                        WHERE login=:login
-                                    """), {"login": user['login'], "admin": st.session_state.get("name", "admin")})
-                                    conn.commit()
-                                    conn.close()
-                                    log_audit("block_user", "user", user['login'], f"{user['name']} {user['lastname']}", "تم التوقيف يدوياً")
-                                    st.success("🚫 تم التوقيف")
-                                    st.rerun()
+                # إضافة عمود الحالة المعروضة
+                users['الحالة'] = users.apply(lambda x: 
+                    '🔴 موقوف كلياً' if x['status'] == 'stopped' 
+                    else f'🟡 موقوف جزئياً ({x["partial_block_percent"]}%)' if x.get('partial_block_percent', 0) > 0 
+                    else '🟢 نشط', axis=1)
+                st.dataframe(users[['login', 'name', 'lastname', 'role', 'الحالة', 'created_at', 'created_by']], use_container_width=True)
             else:
                 st.warning("❌ لم يتم العثور على حسابات")
         
-        # عرض جميع الحسابات
         if st.button("📊 عرض جميع الحسابات", use_container_width=True):
             conn = get_connection()
-            all_users = pd.read_sql("SELECT login, name, lastname, role, status, created_at, created_by, login_count FROM users ORDER BY created_at DESC", conn)
+            all_users = pd.read_sql("SELECT login, name, lastname, role, status, partial_block_percent, created_at, created_by FROM users ORDER BY created_at DESC", conn)
             conn.close()
+            all_users['الحالة'] = all_users.apply(lambda x: 
+                '🔴 موقوف كلياً' if x['status'] == 'stopped' 
+                else f'🟡 موقوف جزئياً ({x["partial_block_percent"]}%)' if x.get('partial_block_percent', 0) > 0 
+                else '🟢 نشط', axis=1)
             st.dataframe(all_users, use_container_width=True)
     
     # =========================
-    # 🚫 توقيف حساب
+    # 🚫 توقيف كامل
     # =========================
-    elif choice == "🚫 توقيف حساب":
-        st.subheader("🚫 توقيف حساب")
+    elif choice == "🚫 توقيف كامل":
+        st.subheader("🚫 توقيف حساب (كلياً)")
         
         conn = get_connection()
         users = pd.read_sql("SELECT login, name, lastname FROM users WHERE status='active'", conn)
@@ -500,69 +329,206 @@ def admin_panel():
             login = user.split("(")[-1].replace(")", "")
             reason = st.text_area("سبب التوقيف")
             
-            if st.button("توقيف", type="primary"):
+            if st.button("توقيف كلياً", type="primary"):
                 conn = get_connection()
                 conn.execute(text("""
-                    UPDATE users SET status='stopped', blocked_at=NOW(), blocked_reason=:reason, blocked_by=:admin
+                    UPDATE users SET status='stopped', blocked_at=NOW(), blocked_reason=:reason, blocked_by=:admin, partial_block_percent=0
                     WHERE login=:login
-                """), {"login": login, "reason": reason if reason else "تم التوقيف يدوياً", "admin": st.session_state.get("name", "admin")})
+                """), {"login": login, "reason": reason if reason else "تم التوقيف كلياً", "admin": st.session_state.get("name", "admin")})
                 conn.execute(text("""
                     INSERT INTO users_block_log (user_login, blocked_reason, blocked_by)
                     VALUES (:login, :reason, :admin)
-                """), {"login": login, "reason": reason if reason else "تم التوقيف يدوياً", "admin": st.session_state.get("name", "admin")})
+                """), {"login": login, "reason": reason if reason else "تم التوقيف كلياً", "admin": st.session_state.get("name", "admin")})
                 conn.commit()
                 conn.close()
                 
-                log_audit("manual_block", "user", login, user, reason)
-                st.success("✅ تم التوقيف بنجاح")
+                log_audit("full_block", "user", login, user, reason)
+                st.success("✅ تم التوقيف الكلي")
                 st.rerun()
         else:
-            st.info("لا توجد حسابات نشطة للتوقيف")
+            st.info("لا توجد حسابات نشطة")
     
     # =========================
-    # 🔄 إعادة تفعيل حساب
+    # ⚠️ توقيف جزئي (جديد)
     # =========================
-    elif choice == "🔄 إعادة تفعيل حساب":
-        st.subheader("🔄 إعادة تفعيل حساب موقوف")
+    elif choice == "⚠️ توقيف جزئي":
+        st.subheader("⚠️ توقيف جزئي للحساب")
+        
+        conn = get_connection()
+        users = pd.read_sql("SELECT login, name, lastname, partial_block_percent FROM users WHERE status='active'", conn)
+        conn.close()
+        
+        if not users.empty:
+            user = st.selectbox("اختار الحساب", users.apply(lambda x: f"{x['name']} {x['lastname']} ({x['login']}) - حالياً: {x['partial_block_percent']}%", axis=1))
+            login = user.split("(")[-1].replace(")", "").split(" -")[0]
+            
+            st.markdown("### اختر نسبة التوقيف")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                if st.button("🔴 10%", use_container_width=True):
+                    st.session_state.partial_percent = 10
+            with col2:
+                if st.button("🟠 25%", use_container_width=True):
+                    st.session_state.partial_percent = 25
+            with col3:
+                if st.button("🟡 50%", use_container_width=True):
+                    st.session_state.partial_percent = 50
+            with col4:
+                if st.button("🟤 75%", use_container_width=True):
+                    st.session_state.partial_percent = 75
+            
+            # عرض النسبة المختارة
+            if "partial_percent" in st.session_state:
+                st.info(f"النسبة المختارة: *{st.session_state.partial_percent}%*")
+                reason = st.text_area("سبب التوقيف الجزئي")
+                
+                if st.button("تطبيق التوقيف الجزئي", type="primary"):
+                    conn = get_connection()
+                    conn.execute(text("""
+                        UPDATE users 
+                        SET partial_block_percent = :percent,
+                            partial_block_reason = :reason,
+                            partial_blocked_at = NOW(),
+                            partial_blocked_by = :admin
+                        WHERE login = :login
+                    """), {
+                        "percent": st.session_state.partial_percent,
+                        "reason": reason if reason else f"تم التوقيف الجزئي بنسبة {st.session_state.partial_percent}%",
+                        "admin": st.session_state.get("name", "admin"),
+                        "login": login
+                    })
+                    conn.execute(text("""
+                        INSERT INTO partial_block_log (user_login, block_percent, block_reason, blocked_by)
+                        VALUES (:login, :percent, :reason, :admin)
+                    """), {
+                        "login": login,
+                        "percent": st.session_state.partial_percent,
+                        "reason": reason if reason else f"تم التوقيف الجزئي بنسبة {st.session_state.partial_percent}%",
+                        "admin": st.session_state.get("name", "admin")
+                    })
+                    conn.commit()
+                    conn.close()
+                    
+                    log_audit("partial_block", "user", login, user, f"تم التوقيف بنسبة {st.session_state.partial_percent}% - {reason}")
+                    st.success(f"✅ تم توقيف الحساب بنسبة {st.session_state.partial_percent}%")
+                    del st.session_state.partial_percent
+                    st.rerun()
+        else:
+            st.info("لا توجد حسابات نشطة")
+    
+    # =========================
+    # 🔄 استرجاع حساب موقوف جزئياً (جديد)
+    # =========================
+    elif choice == "🔄 استرجاع حساب موقوف جزئياً":
+        st.subheader("🔄 استرجاع حساب موقوف جزئياً")
+        
+        conn = get_connection()
+        users = pd.read_sql("""
+            SELECT login, name, lastname, partial_block_percent, partial_block_reason, partial_blocked_at 
+            FROM users WHERE status='active' AND partial_block_percent > 0
+        """, conn)
+        conn.close()
+        
+        if not users.empty:
+            user = st.selectbox("اختار الحساب الموقوف جزئياً", users.apply(lambda x: f"{x['name']} {x['lastname']} ({x['login']}) - موقوف {x['partial_block_percent']}%", axis=1))
+            login = user.split("(")[-1].replace(")", "").split(" -")[0]
+            
+            # عرض معلومات التوقيف الحالية
+            user_data = users[users['login'] == login].iloc[0]
+            st.warning(f"""
+            *معلومات التوقيف الحالية:*
+            - *نسبة التوقيف:* {user_data['partial_block_percent']}%
+            - *سبب التوقيف:* {user_data['partial_block_reason'] if user_data['partial_block_reason'] else 'غير مسجل'}
+            - *تاريخ التوقيف:* {user_data['partial_blocked_at']}
+            """)
+            
+            st.markdown("### اختر نسبة الاسترجاع")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                if st.button("🟢 استرجاع 10%", use_container_width=True):
+                    st.session_state.restore_percent = 10
+            with col2:
+                if st.button("🟢 استرجاع 25%", use_container_width=True):
+                    st.session_state.restore_percent = 25
+            with col3:
+                if st.button("🟢 استرجاع 50%", use_container_width=True):
+                    st.session_state.restore_percent = 50
+            with col4:
+                if st.button("🟢 استرجاع 75%", use_container_width=True):
+                    st.session_state.restore_percent = 75
+            
+            if "restore_percent" in st.session_state:
+                current_percent = user_data['partial_block_percent']
+                new_percent = max(0, current_percent - st.session_state.restore_percent)
+                
+                st.info(f"""
+                *الاسترجاع المقترح:*
+                - النسبة الحالية: {current_percent}%
+                - نسبة الاسترجاع: {st.session_state.restore_percent}%
+                - النسبة الجديدة: {new_percent}%
+                """)
+                
+                if st.button("تطبيق الاسترجاع", type="primary"):
+                    conn = get_connection()
+                    if new_percent == 0:
+                        # استرجاع كامل
+                        conn.execute(text("""
+                            UPDATE users 
+                            SET partial_block_percent = 0,
+                                partial_block_reason = NULL,
+                                partial_blocked_at = NULL,
+                                partial_blocked_by = NULL
+                            WHERE login = :login
+                        """), {"login": login})
+                        st.success(f"✅ تم استرجاع الحساب بالكامل")
+                    else:
+                        # استرجاع جزئي
+                        conn.execute(text("""
+                            UPDATE users 
+                            SET partial_block_percent = :new_percent
+                            WHERE login = :login
+                        """), {"new_percent": new_percent, "login": login})
+                        st.success(f"✅ تم استرجاع {st.session_state.restore_percent}% من الحساب، النسبة المتبقية: {new_percent}%")
+                    
+                    conn.commit()
+                    conn.close()
+                    
+                    log_audit("partial_restore", "user", login, user, f"تم استرجاع {st.session_state.restore_percent}%")
+                    del st.session_state.restore_percent
+                    st.rerun()
+        else:
+            st.info("لا توجد حسابات موقوفة جزئياً")
+    
+    # =========================
+    # ✅ إعادة تفعيل كامل
+    # =========================
+    elif choice == "✅ إعادة تفعيل كامل":
+        st.subheader("✅ إعادة تفعيل حساب موقوف كلياً")
         
         conn = get_connection()
         users = pd.read_sql("SELECT login, name, lastname, blocked_at, blocked_reason FROM users WHERE status='stopped'", conn)
         conn.close()
         
         if not users.empty:
-            user = st.selectbox("اختار الحساب الموقوف", users.apply(lambda x: f"{x['name']} {x['lastname']} ({x['login']})", axis=1))
+            user = st.selectbox("اختار الحساب", users.apply(lambda x: f"{x['name']} {x['lastname']} ({x['login']})", axis=1))
             login = user.split("(")[-1].replace(")", "")
             
-            # عرض معلومات التوقيف
-            user_data = users[users['login'] == login].iloc[0]
-            st.info(f"""
-            *معلومات التوقيف:*
-            - *تاريخ التوقيف:* {user_data['blocked_at']}
-            - *سبب التوقيف:* {user_data['blocked_reason'] if user_data['blocked_reason'] else 'غير مسجل'}
-            """)
-            
-            # التحقق من وجود شكاية
-            conn = get_connection()
-            recl_count = conn.execute(text("SELECT COUNT(*) FROM reclamations_extended WHERE account_login=:login"), {"login": login}).fetchone()[0]
-            conn.close()
-            
-            if recl_count == 0:
-                st.error("❌ لا يمكن إعادة التفعيل بدون شكاية مسجلة")
-            else:
-                if st.button("✅ إعادة تفعيل", type="primary"):
-                    conn = get_connection()
-                    conn.execute(text("""
-                        UPDATE users SET status='active', blocked_at=NULL, blocked_reason=NULL, blocked_by=NULL, failed_login_attempts=0
-                        WHERE login=:login
-                    """), {"login": login})
-                    conn.commit()
-                    conn.close()
-                    
-                    log_audit("unblock_user", "user", login, user, "تم إعادة التفعيل عبر شكاية")
-                    st.success("✅ تم إعادة التفعيل بنجاح")
-                    st.rerun()
+            if st.button("✅ إعادة تفعيل كلياً", type="primary"):
+                conn = get_connection()
+                conn.execute(text("""
+                    UPDATE users SET status='active', blocked_at=NULL, blocked_reason=NULL, blocked_by=NULL, failed_login_attempts=0, partial_block_percent=0
+                    WHERE login=:login
+                """), {"login": login})
+                conn.commit()
+                conn.close()
+                
+                log_audit("full_unblock", "user", login, user, "تم إعادة التفعيل الكلي")
+                st.success("✅ تم إعادة التفعيل الكلي")
+                st.rerun()
         else:
-            st.info("لا توجد حسابات موقوفة")
+            st.info("لا توجد حسابات موقوفة كلياً")
     
     # =========================
     # 🔑 تغيير كلمة المرور
@@ -595,7 +561,7 @@ def admin_panel():
                     conn.close()
                     
                     log_audit("change_password", "user", login, user, "تم تغيير كلمة المرور")
-                    st.success("✅ تم تغيير كلمة المرور بنجاح")
+                    st.success("✅ تم تغيير كلمة المرور")
     
     # =========================
     # 🗑️ حذف حساب
@@ -610,7 +576,7 @@ def admin_panel():
         conn.close()
         
         if not users.empty:
-            user = st.selectbox("اختار الحساب للحذف", users.apply(lambda x: f"{x['name']} {x['lastname']} ({x['login']}) - {x['role']}", axis=1))
+            user = st.selectbox("اختار الحساب للحذف", users.apply(lambda x: f"{x['name']} {x['lastname']} ({x['login']})", axis=1))
             login = user.split("(")[-1].replace(")", "").split(" ")[0]
             confirm = st.text_input("اكتب DELETE لتأكيد الحذف")
             
@@ -621,8 +587,8 @@ def admin_panel():
                     conn.commit()
                     conn.close()
                     
-                    log_audit("delete_user", "user", login, user, "تم حذف الحساب نهائياً")
-                    st.success("✅ تم حذف الحساب")
+                    log_audit("delete_user", "user", login, user, "تم حذف الحساب")
+                    st.success("✅ تم الحذف")
                     st.rerun()
                 else:
                     st.error("❌ اكتب DELETE لتأكيد الحذف")
@@ -635,52 +601,19 @@ def admin_panel():
     elif choice == "📩 الشكايات":
         st.subheader("📩 إدارة الشكايات")
         
-        tab1, tab2 = st.tabs(["📋 الشكايات الموسعة", "📋 الشكايات العادية"])
+        conn = get_connection()
+        df = pd.read_sql("SELECT * FROM reclamations_extended ORDER BY id DESC", conn)
+        conn.close()
         
-        with tab1:
-            conn = get_connection()
-            df = pd.read_sql("SELECT * FROM reclamations_extended ORDER BY id DESC", conn)
-            conn.close()
-            
-            if df.empty:
-                st.info("لا توجد شكايات")
-            else:
-                for _, row in df.iterrows():
-                    with st.expander(f"📄 #{row['id']} - {row['caller_name']} {row['caller_lastname']} - {row['account_name']} {row['account_lastname']}"):
-                        st.write(f"*المتصل:* {row['caller_name']} {row['caller_lastname']}")
-                        st.write(f"*صاحب الحساب:* {row['account_name']} {row['account_lastname']} ({row['account_login']})")
-                        st.write(f"*السبب:* {row['reason']}")
-                        st.write(f"*التاريخ:* {row['created_at']}")
-                        st.write(f"*الحالة:* {format_status(row['status'])}")
-                        
-                        if row['status'] == 'pending':
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                if st.button(f"✅ قبول", key=f"accept_{row['id']}"):
-                                    conn = get_connection()
-                                    conn.execute(text("UPDATE reclamations_extended SET status='done' WHERE id=:id"), {"id": row['id']})
-                                    conn.commit()
-                                    conn.close()
-                                    log_audit("approve_reclamation", "reclamation", str(row['id']), row['account_login'], "تم قبول الشكاية")
-                                    st.rerun()
-                            with col2:
-                                if st.button(f"❌ رفض", key=f"reject_{row['id']}"):
-                                    conn = get_connection()
-                                    conn.execute(text("UPDATE reclamations_extended SET status='rejected' WHERE id=:id"), {"id": row['id']})
-                                    conn.commit()
-                                    conn.close()
-                                    log_audit("reject_reclamation", "reclamation", str(row['id']), row['account_login'], "تم رفض الشكاية")
-                                    st.rerun()
-        
-        with tab2:
-            conn = get_connection()
-            df = pd.read_sql("SELECT * FROM reclamations ORDER BY id DESC", conn)
-            conn.close()
-            
-            if df.empty:
-                st.info("لا توجد شكايات عادية")
-            else:
-                st.dataframe(df, use_container_width=True)
+        if df.empty:
+            st.info("لا توجد شكايات")
+        else:
+            for _, row in df.iterrows():
+                with st.expander(f"📄 #{row['id']} - {row['caller_name']} {row['caller_lastname']}"):
+                    st.write(f"*صاحب الحساب:* {row['account_name']} {row['account_lastname']} ({row['account_login']})")
+                    st.write(f"*السبب:* {row['reason']}")
+                    st.write(f"*التاريخ:* {row['created_at']}")
+                    st.write(f"*الحالة:* {format_status(row['status'])}")
     
     # =========================
     # 🔌 التحكم في النظام
@@ -690,24 +623,17 @@ def admin_panel():
         
         current_status = get_system_status()
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if current_status == "on":
-                st.success("✅ النظام يعمل بشكل طبيعي")
-                if st.button("🛑 إيقاف النظام", use_container_width=True):
-                    set_system_status("off")
-                    log_audit("system_off", "system", None, None, "تم إيقاف النظام")
-                    st.rerun()
-            else:
-                st.error("🔴 النظام متوقف")
-                if st.button("▶️ تشغيل النظام", use_container_width=True):
-                    set_system_status("on")
-                    log_audit("system_on", "system", None, None, "تم تشغيل النظام")
-                    st.rerun()
-        
-        with col2:
-            if st.button("🔄 إعادة تشغيل الجلسة", use_container_width=True):
-                st.cache_data.clear()
+        if current_status == "on":
+            st.success("✅ النظام يعمل بشكل طبيعي")
+            if st.button("🛑 إيقاف النظام", use_container_width=True):
+                set_system_status("off")
+                log_audit("system_off", "system", None, None, "تم إيقاف النظام")
+                st.rerun()
+        else:
+            st.error("🔴 النظام متوقف")
+            if st.button("▶️ تشغيل النظام", use_container_width=True):
+                set_system_status("on")
+                log_audit("system_on", "system", None, None, "تم تشغيل النظام")
                 st.rerun()
     
     # =========================
@@ -726,7 +652,6 @@ def admin_panel():
         if not audit.empty:
             st.dataframe(audit, use_container_width=True)
             
-            # تصدير إلى CSV
             csv = audit.to_csv(index=False).encode('utf-8')
             st.download_button("📥 تصدير إلى CSV", csv, f"audit_log_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
         else:
@@ -744,19 +669,23 @@ def admin_panel():
         
         st.dataframe(permissions, use_container_width=True)
         
-        st.markdown("### 📝 إضافة صلاحية جديدة")
-        new_role = st.text_input("اسم الدور الجديد")
-        new_perms = st.text_input("الصلاحيات (مفصولة بفاصلة)")
+        st.markdown("### 📝 تغيير صلاحيات مستخدم")
         
-        if st.button("إضافة"):
-            if new_role and new_perms:
-                perms_list = [p.strip() for p in new_perms.split(",")]
+        conn = get_connection()
+        users = pd.read_sql("SELECT login, name, lastname, role FROM users", conn)
+        conn.close()
+        
+        if not users.empty:
+            user = st.selectbox("اختار المستخدم", users.apply(lambda x: f"{x['name']} {x['lastname']} ({x['login']})", axis=1))
+            login = user.split("(")[-1].replace(")", "")
+            new_role = st.selectbox("الدور الجديد", ["viewer", "tech_support", "admin", "super_admin"])
+            
+            if st.button("تحديث الصلاحية"):
                 conn = get_connection()
-                conn.execute(text("""
-                    INSERT INTO user_permissions (role, permissions) VALUES (:role, :perms)
-                """), {"role": new_role, "perms": perms_list})
+                conn.execute(text("UPDATE users SET role=:role WHERE login=:login"), {"role": new_role, "login": login})
                 conn.commit()
                 conn.close()
-                log_audit("add_permission", "permission", new_role, None, f"تم إضافة دور {new_role} بالصلاحيات {new_perms}")
-                st.success("✅ تمت الإضافة")
+                
+                log_audit("change_permission", "user", login, user, f"تم تغيير الدور إلى {new_role}")
+                st.success("✅ تم تحديث الصلاحية")
                 st.rerun()
