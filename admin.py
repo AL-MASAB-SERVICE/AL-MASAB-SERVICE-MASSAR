@@ -136,7 +136,23 @@ def show_dashboard():
         
         st.divider()
         
-        # عرض آخر العمليات
+        st.markdown("### 🟡 الحسابات الموقوفة جزئياً")
+        try:
+            conn = get_connection()
+            partial_users = pd.read_sql("""
+                SELECT login, name, lastname, partial_block_percent, partial_block_reason 
+                FROM users WHERE status='active' AND partial_block_percent > 0
+            """, conn)
+            conn.close()
+            if not partial_users.empty:
+                st.dataframe(partial_users, use_container_width=True)
+            else:
+                st.info("لا توجد حسابات موقوفة جزئياً")
+        except Exception:
+            st.info("لا توجد حسابات موقوفة جزئياً")
+        
+        st.divider()
+        
         st.markdown("### 📋 آخر العمليات المسجلة")
         try:
             conn = get_connection()
@@ -162,48 +178,44 @@ def admin_panel():
     # تفعيل الثيم
     toggle_theme()
     
+    # عنوان التطبيق في السايدبار
+    st.sidebar.markdown("# 🏢 AL MASAB SERVICE")
+    st.sidebar.markdown("---")
+    
     # ثيم الزر
-    theme_col, _ = st.sidebar.columns([1, 5])
-    with theme_col:
-        if st.sidebar.button("🌙" if st.session_state.get("theme", "light") == "light" else "☀️", key="theme_btn"):
+    theme_col1, theme_col2 = st.sidebar.columns([1, 4])
+    with theme_col1:
+        theme_icon = "🌙" if st.session_state.get("theme", "light") == "light" else "☀️"
+        if st.button(theme_icon, key="theme_btn"):
             st.session_state.theme = "dark" if st.session_state.get("theme", "light") == "light" else "light"
             st.rerun()
     
-    # بناء القائمة
-    menu_list = ["🏠 Dashboard"]
+    # معلومات المستخدم
+    st.sidebar.markdown(f"""
+    ---
+    ### 👤 {st.session_state.get('name', 'Admin')}
+    *الدور:* {st.session_state.get('role', 'admin')}
+    ---
+    """)
     
-    if has_permission("create_user"):
-        menu_list.append("➕ إنشاء حساب")
-    if has_permission("view_users"):
-        menu_list.append("📋 عرض الحسابات")
-    if has_permission("block_user"):
-        menu_list.append("🚫 توقيف كامل")
-    if has_permission("partial_block_user"):
-        menu_list.append("⚠️ توقيف جزئي")
-    if has_permission("partial_unblock_user"):
-        menu_list.append("🔄 استرجاع جزئي")
-    if has_permission("unblock_user"):
-        menu_list.append("✅ إعادة تفعيل كامل")
-    if has_permission("change_password"):
-        menu_list.append("🔑 تغيير كلمة المرور")
-    if has_permission("delete_user"):
-        menu_list.append("🗑️ حذف حساب")
-    if has_permission("view_reclamations"):
-        menu_list.append("📩 الشكايات")
-    if has_permission("manage_system"):
-        menu_list.append("🔌 التحكم في النظام")
-    if has_permission("view_audit_log"):
-        menu_list.append("📊 سجل التدقيق")
-    if has_permission("manage_permissions"):
-        menu_list.append("👑 إدارة الصلاحيات")
+    # بناء القائمة الكاملة (جميع الأزرار)
+    menu_list = ["🏠 Dashboard"]
+    menu_list.append("➕ إنشاء حساب")
+    menu_list.append("📋 عرض الحسابات")
+    menu_list.append("🚫 توقيف كامل")
+    menu_list.append("⚠️ توقيف جزئي")
+    menu_list.append("🔄 استرجاع جزئي")
+    menu_list.append("✅ إعادة تفعيل كامل")
+    menu_list.append("🔑 تغيير كلمة المرور")
+    menu_list.append("🗑️ حذف حساب")
+    menu_list.append("📩 الشكايات")
+    menu_list.append("🔌 التحكم في النظام")
+    menu_list.append("📊 سجل التدقيق")
+    menu_list.append("👑 إدارة الصلاحيات")
     
     choice = st.sidebar.selectbox("القائمة", menu_list, key="main_menu")
     
-    # عرض معلومات المستخدم
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(f"*👤 {st.session_state.get('name', 'Admin')}*")
-    st.sidebar.markdown(f"*🔑 {st.session_state.get('role', 'admin')}*")
-    
+    # زر تسجيل الخروج (مرة واحدة فقط)
     if st.sidebar.button("🚪 تسجيل الخروج", key="logout_btn"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
@@ -221,10 +233,14 @@ def admin_panel():
     elif choice == "➕ إنشاء حساب":
         st.subheader("➕ إنشاء حساب جديد")
         
-        name = st.text_input("الإسم", key="create_name")
-        lastname = st.text_input("النسب", key="create_lastname")
-        phone = st.text_input("الهاتف", key="create_phone")
-        subject = st.text_input("المادة", key="create_subject")
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("الإسم", key="create_name")
+            lastname = st.text_input("النسب", key="create_lastname")
+        with col2:
+            phone = st.text_input("الهاتف", key="create_phone")
+            subject = st.text_input("المادة", key="create_subject")
+        
         role = st.selectbox("الدور", ["prof", "surveillant", "directeur", "parents", "admin", "tech_support", "viewer"], key="create_role")
         
         if st.button("إنشاء حساب", key="create_btn"):
@@ -255,8 +271,7 @@ def admin_panel():
                     log_audit("create_user", "user", login, f"{name} {lastname}", f"تم إنشاء حساب بدور {role}")
                     
                     st.success(f"✅ تم إنشاء الحساب")
-                    st.info(f"*Login:* {login}")
-                    st.warning(f"*Password:* {password}")
+                    st.code(f"Login: {login}\nPassword: {password}")
                 except Exception as e:
                     st.error(f"خطأ: {e}")
             else:
@@ -268,8 +283,11 @@ def admin_panel():
     elif choice == "📋 عرض الحسابات":
         st.subheader("📋 عرض الحسابات")
         
-        search_name = st.text_input("🔍 إسم المستخدم", key="search_name")
-        search_lastname = st.text_input("🔍 نسب المستخدم", key="search_lastname")
+        col1, col2 = st.columns(2)
+        with col1:
+            search_name = st.text_input("🔍 إسم المستخدم", key="search_name")
+        with col2:
+            search_lastname = st.text_input("🔍 نسب المستخدم", key="search_lastname")
         
         if st.button("🔍 بحث", key="search_btn"):
             try:
@@ -362,7 +380,8 @@ def admin_panel():
                 
                 st.markdown("### اختر نسبة التوقيف")
                 
-                percent = st.radio("النسبة", ["10%", "25%", "50%", "75%"], horizontal=True, key="partial_percent_radio")
+                percent_options = ["10%", "25%", "50%", "75%"]
+                percent = st.radio("النسبة", percent_options, horizontal=True, key="partial_percent_radio")
                 percent_value = int(percent.replace("%", ""))
                 
                 reason = st.text_area("سبب التوقيف الجزئي", key="partial_block_reason")
@@ -422,7 +441,8 @@ def admin_panel():
                 """)
                 
                 st.markdown("### اختر نسبة الاسترجاع")
-                restore_percent = st.radio("نسبة الاسترجاع", ["10%", "25%", "50%", "75%"], horizontal=True, key="restore_percent_radio")
+                restore_options = ["10%", "25%", "50%", "75%"]
+                restore_percent = st.radio("نسبة الاسترجاع", restore_options, horizontal=True, key="restore_percent_radio")
                 restore_value = int(restore_percent.replace("%", ""))
                 
                 new_percent = max(0, current_percent - restore_value)
@@ -635,7 +655,7 @@ def admin_panel():
                 st.download_button("📥 تصدير إلى CSV", csv, f"audit_log_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv", key="download_audit")
             else:
                 st.info("لا توجد سجلات تدقيق")
-        except Exception as e:
+        except Exception:
             st.info("لا توجد سجلات تدقيق بعد")
     
     # =========================
