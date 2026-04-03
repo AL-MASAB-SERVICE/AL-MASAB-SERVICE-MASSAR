@@ -345,13 +345,6 @@ def admin_panel():
     
     st.sidebar.markdown("---")
     
-    # زر تسجيل الخروج (مرة واحدة فقط)
-    if st.sidebar.button("🚪 تسجيل الخروج", key="logout_btn", use_container_width=True):
-        # مسح الجلسة بالكامل
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
-    
     # =========================
     # Dashboard
     # =========================
