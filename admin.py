@@ -299,33 +299,6 @@ def admin_panel():
     toggle_theme()
     load_enterprise_css()
     
-    # عنوان التطبيق في السايدبار
-    st.sidebar.markdown("""
-    <div style='text-align: center; padding: 10px;'>
-        <h2 style='color: #667eea;'>🏢 AL MASAB</h2>
-        <p style='color: #888; font-size: 12px;'>Enterprise System v3.0</p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.sidebar.markdown("---")
-    
-    # ثيم الزر
-    theme_col1, theme_col2 = st.sidebar.columns([1, 4])
-    with theme_col1:
-        theme_icon = "🌙" if st.session_state.get("theme", "light") == "light" else "☀️"
-        if st.button(theme_icon, key="theme_btn", help="تغيير المظهر"):
-            st.session_state.theme = "dark" if st.session_state.get("theme", "light") == "light" else "light"
-            st.rerun()
-    
-    # معلومات المستخدم
-    st.sidebar.markdown(f"""
-    <div style='background: linear-gradient(135deg, #667eea, #764ba2); padding: 15px; border-radius: 10px; margin: 10px 0;'>
-        <div style='color: white; text-align: center;'>
-            <div style='font-size: 18px; font-weight: bold;'>👤 {st.session_state.get('name', 'Admin')}</div>
-            <div style='font-size: 12px; opacity: 0.9;'>🔑 {st.session_state.get('role', 'admin')}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
     # بناء القائمة الكاملة
     menu_list = ["🏠 Dashboard"]
     menu_list.append("➕ إنشاء حساب")
