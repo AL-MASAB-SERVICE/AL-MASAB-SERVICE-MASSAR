@@ -760,7 +760,7 @@ def admin_panel():
         
         try:
             conn = get_connection()
-            users = pd.read_sql("SELECT login, name, lastname, role FROM users WHERE login != :current", 
+            users = pd.read_sql("SELECT login, name, lastname, role FROM users WHERE login != %(current)s", 
                                 conn, params={"current": st.session_state.get("login_user", "")})
             conn.close()
             
